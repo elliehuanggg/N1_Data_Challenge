@@ -1,0 +1,7 @@
+---
+title: "N1 Data Challenge"
+author: "Ellie Huang"
+date: 11-08-25
+output: pdf_document
+---
+
