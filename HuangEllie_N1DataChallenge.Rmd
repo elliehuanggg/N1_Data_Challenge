@@ -5,3 +5,78 @@ date: 11-08-25
 output: pdf_document
 ---
 
+```{r setup, include = F}
+# Import necessary libraries and set global chunk options
+library(knitr)
+library(readr)
+library(janitor)
+library(dplyr)
+library(tidyverse)
+
+knitr::opts_chunk$set(echo=TRUE, warning=TRUE, cache = TRUE, message=TRUE, tidy=TRUE)
+```
+
+
+```{r data preprocessing, include = F}
+# Read in data
+census_data <- read_csv("500_cities.csv", show_col_types = F) 
+census_data <- clean_names(census_data)
+
+food_data <- read_csv("2025-food-environment-atlas-data/state_and_county_data.csv", show_col_types = F)
+var_names <- read_csv("2025-food-environment-atlas-data/VariableList.csv", show_col_types = F)
+
+# Add category name and units to food data
+food_data <- left_join(food_data, var_names, by = "Variable_Code")
+food_data <- clean_names(food_data) |>
+  select(-c(variable_name, category_code, subcategory_name))
+
+# Quick checks for duplicates and missing data 
+length(duplicated(census_data)) 
+length(duplicated(food_data))
+
+sum(is.na(census_data))
+colSums(is.na(census_data))
+
+sum(is.na(food_data))
+
+# Filter out missing data
+census_data <- census_data |>
+  select(-c(paptest_crude_prev, paptest_crude95ci)) |>
+  drop_na()
+
+food_data <- food_data |>
+  filter(!(value == -9999 | value == -8888 | fips == "N/A"))
+
+# The fips codes don't match, so we are going to add a county fips to the census data; place fips is the same as county but with 2 extra digits
+census_data_filtered <- census_data |>
+  select(-matches("_crude95ci$")) |>
+  mutate(fips = substr(place_fips, 1, 5)) |>
+  group_by(fips) |>
+  summarise(
+    county_population2010 = sum(population2010),
+    across(ends_with("_crude_prev"), ~ weighted.mean(.x, w = population2010)), # take weighted average because crude estimates are percentages, so we need to take into account population differences between places
+    .groups = "drop"
+  )
+# I did check that there were 484 unique county fips codes in the census data
+
+# Merge food data with census data using FIPS codes (inner join, records that have matching code in both tables)
+merged_data <- inner_join(census_data_filtered, food_data, by = "fips")
+```
+
+# Abstract
+
+# Introduction
+
+# Exploratory Data Analysis
+
+## Missing data
+
+There were about 5062 missing values from the census data. Paptest had over 2000 missing values, so we decided to drop these two variables (missingness rate of about 8.1%). Other variables only had about 100 missing observations or less, so we keep those variables and drop the missing observations for our analysis. We removed about 156 observations in total.
+
+From the food data, we checked for no data fields which were referenced with N/A or -9999. We removed these, as well as counties that didn't exist in that particular year, which made up a significant portion of the full data with 90,464 observations. 
+
+# Methods
+
+# Results
+
+# Discussion
