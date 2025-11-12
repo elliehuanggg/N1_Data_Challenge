@@ -1,7 +1,8 @@
 ---
-title: "N1 Data Challenge"
+title: "Addressing Food Access Challenges within Medicare Advantage Plan Membership"
+subtitle: "N1 Data Challenge"
 author: "Ellie Huang"
-date: 11-08-25
+date: 11-11-25
 output: pdf_document
 ---
 
@@ -12,8 +13,10 @@ library(readr)
 library(janitor)
 library(dplyr)
 library(tidyverse)
+library(tidyr)
+library(ggrepel)
 
-knitr::opts_chunk$set(echo=TRUE, warning=TRUE, cache = TRUE, message=TRUE, tidy=TRUE)
+knitr::opts_chunk$set(echo=FALSE, warning=TRUE, message=TRUE)
 ```
 
 
@@ -36,7 +39,6 @@ length(duplicated(food_data))
 
 sum(is.na(census_data))
 colSums(is.na(census_data))
-
 sum(is.na(food_data))
 
 # Filter out missing data
@@ -45,7 +47,12 @@ census_data <- census_data |>
   drop_na()
 
 food_data <- food_data |>
-  filter(!(value == -9999 | value == -8888 | fips == "N/A"))
+  filter(!(value == -9999 | value == -8888 | fips == "N/A")) |>
+  pivot_wider(
+    id_cols = c(fips, state, county),
+    names_from = variable_code,
+    values_from = value
+  )
 
 # The fips codes don't match, so we are going to add a county fips to the census data; place fips is the same as county but with 2 extra digits
 census_data_filtered <- census_data |>
@@ -54,29 +61,256 @@ census_data_filtered <- census_data |>
   group_by(fips) |>
   summarise(
     county_population2010 = sum(population2010),
-    across(ends_with("_crude_prev"), ~ weighted.mean(.x, w = population2010)), # take weighted average because crude estimates are percentages, so we need to take into account population differences between places
+    
+    # take weighted average because crude estimates are percentages, so we need to take into account population differences between places
+    across(ends_with("_crude_prev"), ~ weighted.mean(.x, w = population2010)), 
     .groups = "drop"
   )
-# I did check that there were 484 unique county fips codes in the census data
+# Check that there were 484 unique county fips codes in the census data
 
 # Merge food data with census data using FIPS codes (inner join, records that have matching code in both tables)
 merged_data <- inner_join(census_data_filtered, food_data, by = "fips")
+
+# Check missing data for merged data; there are missing values but I'm not sure why but I would look into this with more time
+colSums(is.na(merged_data))
 ```
 
-# Abstract
+# Executive Summary
+
+This analysis examines how food access challenges relate to health outcomes across U.S. counties to guide resource allocation for a national Medicare Advantage plan. Using data from the USDA Food Environment Atlas (2025) and the CDC 500 Cities Project (2019), we assess the overlap between food insecurity, poverty, and chronic disease prevalence.
+
+Counties in the South and rural regions show the greatest concentration of both food insecurity and poor health outcomes, including obesity, diabetes, and poor mental health. Seniors are particularly affected, with median food access gaps of about 20% in metropolitan areas and 45% in rural areas, compared to the general population.
+
+These results indicate a need to prioritize outreach to high-risk members and develop targeted approaches, such as screening tools and referral systems that connect members to community-based organizations addressing food insecurity. A similar approach proved effective in N1 Health’s previous case study, where N1 helped a healthcare payer successfully use data-driven targeting to engage Medicaid members more precisely and improve outcomes. Creating priority lists for rural and Southern counties would help focus resources where the need is highest. While urban areas may benefit from local partnerships and food bank collaborations, rural regions may require mobile pantries or coordinated delivery programs to reach people living in more isolated areas.
+
+Addressing food insecurity through these strategies aligns with the plan’s goal to provide competitive, high-value options, strengthens member engagement, and helps improve overall health outcomes.
 
 # Introduction
 
+Managing chronic health conditions often forces individuals to make difficult financial tradeoffs, with the cost of care leaving less money for basic necessities like food. This creates a compounding cycle: limited access to nutritious food contributes to worsening health, which in turn increases medical expenses and limits access to healthy options even more.
+
+The USDA defines four levels of food security-- high, marginal, low, and very low. Low and very low food security are defined by an individual's inability to consistently access or afford adequate, nutritious food. Food insecurity is shaped by multiple factors, including income, employment, race and ethnicity, and disability status. Addressing this issue requires understanding who needs support, how to ensure food resources are accessible and sustainable, and how to provide safe storage and preparation options that meet people’s daily needs.
+
+This challenge is especially relevant today, as Medicare Advantage operates in an increasingly complex and challenging business environment. To improve care quality while reducing costs, plans must utilize data-driven, personalized interventions that efficiently target highest-risk members and avoid low-value outreach. This is where N1 Health comes in.
+
+N1 Health’s client, a national Medicare Advantage plan, seeks to understand how best to use its resources to address food access challenges among its members. This analysis aims to answer:  
+
+- Where should we deploy a food access program, and how many people would be included?  
+
+- How many members might be successfully engaged?  
+
+- Which subgroups of the population would benefit most?  
+
+- What is the projected impact of this program?  
+
+To answer these questions, we identify counties and member groups most affected by limited food access, focusing on percentage-based indicators that allow for cross-county comparisons.
+
 # Exploratory Data Analysis
+
+This analysis combines two publicly available datasets to examine how food access and socioeconomic conditions relate to county-level health outcomes in the United States. 
+
+The Food Environment Atlas (2025) dataset includes over 300 variables describing county-level characteristics, such as: Access and Proximity to Food Stores, Store and Restaurant Availability, Food Assistance Programs, State Food Insecurity, Local Food Systems, Food Taxes, and Socioeconomic Characteristics. There are about 3,000 unique counties.
+
+The CDC - 500 Cities Project (2019) dataset includes geographic identifies (GEOID/FIPS), population counts, and 27 measures of crude prevalence of health outcomes and behaviors among adults. These include measures such as obesity, diabetes, and heart disease, as well as risk factors related to mental health and preventative care.
+
+Sources:  
+- Centers for Disease Control and Prevention. (2019). 500 Cities Project: Local Data for Better Health. (https://chronicdata.cdc.gov/500-Cities-Places/500-Cities-Census-Tract-level-Data-GIS-Friendly-Fo/k86t-wghb/about_data)  
+- U.S. Department of Agriculture, Economic Research Service. (2025). Food Environment Atlas. (https://www.ers.usda.gov/data-products/food-environment-atlas/data-access-and-documentation-downloads)  
+
+## 2D EDA
+
+**Figure 1.**
+
+*Plot of poverty rates vs food insecurity*  
+
+Not included here, would add a plot showing the relationship between poverty/low income/food insecurity given more time.
+
+```{r, include = F}
+ggplot(merged_data, aes(x = PCT_LACCESS_LOWI19, y = FOODINSEC_18_20)) +
+  geom_point(alpha = 0.6, size = 2) +
+  geom_smooth(method = "lm", se = FALSE, color = "red") +
+  labs(
+    title = "Low income, low access, food insecurity",
+    x = "Poverty rate",
+    y = "food Insec"
+  ) + 
+  theme_minimal()
+```
+
+
+**Figure 2.**. 
+
+*Seniors in rural areas face greater challenges* 
+
+
+```{r, fig.height = 5, fig.width = 8}
+# Compare food access challenges between seniors and the general population, colored by rural vs urban areas 
+# Use metro23 (metro vs. non metro area)
+
+# Mutate METRO23 variable and plot
+fig2 <- merged_data |> 
+  mutate(metro = case_when(
+    METRO23 == 1 ~ "Metro",
+    METRO23 == 0 ~ "Non-metro",
+    TRUE ~ NA_character_),
+    senior_gap = PCT_LACCESS_SENIORS19 - PCT_LACCESS_POP19) |>
+    ggplot(aes(x = metro, y = senior_gap, fill = metro)) + 
+    geom_boxplot(show.legend = FALSE) +
+    labs(title = "Seniors Are More Disadvantaged in Non-metro Counties",
+         subtitle = str_wrap("In non-metro counties (farther away from the city centers), seniors are more likely than the general population to live far from grocery stores.", width = 80),
+         x = "",
+         y = "Senior access gap",
+         caption = str_wrap("Each box shows the distribution of the gap between seniors with low access and the total population. Values above zero mean seniors experience higher food access challenges.", width = 100)) +
+    theme_minimal(base_size = 14) + 
+    theme(plot.caption = element_text(hjust = 0))
+
+ggsave("seniors_rural_plot.jpg", fig2, height = 5, width = 8)
+
+fig2
+```
+
+
+**Figure 3.**
+
+*Food insecurity vs. health outcomes*
+
+
+```{r, message = F, fig.height = 5, fig.width = 8}
+# Build plotting dataset
+fig3_df <- merged_data |>
+  
+  # Select relevant columns
+  select(fips, county,
+         FOODINSEC_21_23, obesity_crude_prev, diabetes_crude_prev, mhlth_crude_prev) |>
+  
+  # Switch to long format; separate rows for each county for obesity, diabetes, and poor mental health
+  pivot_longer(cols = c(obesity_crude_prev, diabetes_crude_prev, mhlth_crude_prev), names_to = "health_outcome", values_to = "prevalence") |> 
+  
+  mutate(health_outcome = recode(health_outcome, 
+                                 obesity_crude_prev = "Obesity",
+                                 diabetes_crude_prev = "Diabetes",
+                                 mhlth_crude_prev = "Poor Mental Health")) # Add names to each health outcome variable
+
+# Identify counties that are top 10% in both food insecurity and health outcomes
+top_counties_foodinsec_neghealth <- fig3_df |>
+  group_by(health_outcome) |>
+  mutate(percentile_90_foodinsec = quantile(FOODINSEC_21_23, 0.90, na.rm = TRUE),
+         percentile_90_prevalence = quantile(prevalence, 0.90, na.rm = TRUE)) |>
+  filter(
+    FOODINSEC_21_23 >= percentile_90_foodinsec & prevalence >= percentile_90_prevalence
+  ) |>
+  ungroup()
+
+# Faceted scatterplot highlighting hotspots
+fig3 <- fig3_df |>
+  ggplot(aes(x = FOODINSEC_21_23, y = prevalence)) +
+  geom_point(alpha = 0.5, color = "darkgrey") +
+  geom_point(data = top_counties_foodinsec_neghealth,
+             aes(x = FOODINSEC_21_23, y = prevalence),
+             color = "darkred",
+             size = 2.5) +
+  geom_text_repel(data = top_counties_foodinsec_neghealth, aes(label = county), size = 3.2, color = "darkred") +
+  facet_wrap(~ health_outcome, scales = "free_y") +
+  labs(title = "Identifying Counties with High Food Insecurity and Poor Health Outcomes.",
+       subtitle = str_wrap("Counties in red fall within the top 10% for both household food insecurity and poor health outcomes, highlighting areas where improving food access may have the greatest health impact.", width = 95),
+       x = "Household food insecurity (3-yr average, %)",
+       y = "Health outcome prevalence estimate (%)",
+       caption = str_wrap("Each point represents a county. Red points mark counties in the top 10% for both household food insecurity and each outcome.", width = 115)) +
+  theme_minimal(base_size = 12) +
+  theme(plot.caption  = element_text(hjust = 0))
+
+ggsave("high_foodinsec_poorhlth_plot.jpg", fig3, height = 5, width = 8)
+
+fig3
+```
+
 
 ## Missing data
 
-There were about 5062 missing values from the census data. Paptest had over 2000 missing values, so we decided to drop these two variables (missingness rate of about 8.1%). Other variables only had about 100 missing observations or less, so we keep those variables and drop the missing observations for our analysis. We removed about 156 observations in total.
+There were about 5,062 missing values in the census data. The Pap test variables had over 2,000 missing values, so we dropped both of them (about 8.1% missingness). For the remaining variables, missingness was around 100 observations or fewer, so we kept those variables and removed only the affected rows. In total, we removed approximately 156 observations.
 
-From the food data, we checked for no data fields which were referenced with N/A or -9999. We removed these, as well as counties that didn't exist in that particular year, which made up a significant portion of the full data with 90,464 observations. 
+In the food data, missing or invalid entries were coded as “N/A,” “-9999,” or “-8888.” We excluded these values, along with records for counties that did not exist in the given year. These removals accounted for a substantial portion of the full dataset, which originally contained 90,464 observations.
 
-# Methods
+## Limitations of the data
+
+The food data used in this analysis was released in 2025, while the census data is from 2019. Because our goal is to examine structural relationships rather than year-to-year changes, this difference in release years should not critically affect our findings. However, it does limit the generalizability of our results to other time periods. Additionally, some variables were collected in different years, which may introduce inconsistencies into the analysis. Despite this, we believe that the datasets reflect relatively stable, underlying patterns.
+
+Several key variables, such as average cost of groceries, are missing, and multiple alternative variables could have been used. The analysis could likely be improved by testing different variable selections or combinations, but due to time constraints, the scope was limited. Finally, the crude prevalence estimates are modeled values rather than direct measurements, which introduces additional uncertainty.
 
 # Results
 
+Travis, Wilbarger, and Crosby counties show the highest levels of both food insecurity and chronic health conditions, including obesity and diabetes. Crosby also exhibited the highest levels of both food insecurity and reported poor mental health. Seniors are disproportionately affected, with median access gaps at about 20% in metropolitan regions and 45% in non-metropolitan ones.
+
 # Discussion
+
+*I would add more to the discussion here about implications from the results.* 
+
+While this analysis did not directly examine racial and ethnic disparities, these factors are known to play a significant role in food insecurity patterns across the country. Incorporating race and ethnicity data in future analyses would provide a clearer understanding of inequities.
+
+This analysis mainly focused on identifying target subgroups and locations. For additional research questions, such as estimating program impact or projecting engagement rates, we could apply predictive modeling. For example, linking referrals to nutrition programs like SNAP or WIC to redemptions per capita (both available in the Food Environment Atlas) could help estimate program success and long-term effectiveness. However, given the recent SNAP benefit reductions and ongoing funding uncertainties, we chose not to focus on these variables in this analysis.
+
+Overall, future work could expand this exploratory analysis into a more predictive framework to support targeted, data-driven program planning that maximizes impact while aligning with the plan’s goals of improving member health outcomes and reducing avoidable costs.
+
+*I would add a short conclusion paragraph here.*
+
+# References
+
+1. Feeding America. (2025). *Map the Meal Gap*. (https://map.feedingamerica.org/).
+
+2. Last Week Tonight with John Oliver. (2025, October 27). *Medicare Advantage*. YouTube. (https://www.youtube.com/watch?v=Ejoi9yfLVCc).
+
+3. N1 Health. (https://www.n1health.com/wp-content/uploads/2022/08/N1Health_CaseStudy_2.pdf).
+
+4. Office of Disease Prevention and Health Promotion. *Food insecurity: Literature summary (Social determinants of health)*. Healthy People 2030. U.S. Department of Health & Human Services. (https://odphp.health.gov/healthypeople/priority-areas/social-determinants-health/literature-summaries/food-insecurity).
+
+5. Odoms-Young, A. M., et al. (2023, December 30). *Food insecurity, neighborhood food environment, and nutrition health disparities: State of the science, research gaps and opportunities*. The American Journal of Clinical Nutrition. (https://pmc.ncbi.nlm.nih.gov/articles/PMC10972712/).
+
+# Appendix
+
+## 1D EDA
+
+```{r, include = F}
+# key summary statistics
+summary(merged_data$PCT_LACCESS_POP19)
+summary(merged_data$PCT_LACCESS_SENIORS19)
+summary(merged_data$POVRATE21)
+summary(merged_data$FOODINSEC_18_20)
+```
+
+```{r, fig.width = 7, fig.height = 4}
+# Plot 1 - centered on the lower end, range from 0-80%
+merged_data |>
+  ggplot(aes(x = PCT_LACCESS_POP19)) +
+  geom_histogram(bins = 20, fill = "steelblue", col = "white") +
+  labs(title = "Distribution of Population with Low Food Access (2019)",
+       x = "Percent of Population with Low Access",
+       y = "Number of Counties") +
+  theme_minimal()
+
+# Plot 2 - centered on the higher end, range between 0-100%
+merged_data |>
+  ggplot(aes(x = PCT_LACCESS_SENIORS19)) +
+  geom_histogram(bins = 12, fill = "steelblue", col = "white") +
+  labs(title = "Distribution of Seniors with Low Food Access (2019)",
+       x = "Percent of Seniors with Low Access",
+       y = "Number of Counties") +
+  theme_minimal()
+
+# Plot 3 - right skewed distribution, peak around 12%, range between 0-30%
+merged_data |>
+  ggplot(aes(x = POVRATE21)) +
+  geom_histogram(bins = 12, fill = "steelblue", col = "white") +
+  labs(title = "Distribution of Poverty Rates (2021)",
+       x = "Poverty Rate",
+       y = "Number of Counties") +
+  theme_minimal()
+
+# Plot 3 - left skewed distribution, range between 0-17.5%
+merged_data |>
+  ggplot(aes(x = FOODINSEC_21_23)) +
+  geom_histogram(bins = 10, fill = "steelblue", col = "white") +
+  labs(title = "Distribution of Food Insecurity (2021-2023)",
+       x = "Percent of Food Insecure Households",
+       y = "Number of Counties") + 
+  theme_minimal()
+```
